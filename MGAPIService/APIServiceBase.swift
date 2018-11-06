@@ -20,17 +20,29 @@ open class APIBase {
         manager = Alamofire.SessionManager(configuration: configuration)
     }
     
-    open func request<T: Mappable>(_ input: APIInputBase) -> Observable<T> {
+    open func requestDataDict<T: Mappable>(_ input: APIInputBase) -> Observable<T> {
         return request(input)
             .map { json -> T in
-                if let t = T(JSON: json) {
-                    return t
+                guard let dict = json as? JSONDictionary, let t = T(JSON: dict) else {
+                    throw APIInvalidResponseError()
                 }
-                throw APIInvalidResponseError()
+                
+                return t
             }
     }
     
-    open func request(_ input: APIInputBase) -> Observable<JSONDictionary> {
+    open func requestDataList<T: Mappable>(_ input: APIInputBase) -> Observable<[T]> {
+        return request(input)
+            .map { json -> [T] in
+                guard let jsons = json as? [JSONDictionary] else {
+                    throw APIInvalidResponseError()
+                }
+                
+                return jsons.compactMap { T(JSON: $0) }
+        }
+    }
+    
+    open func request(_ input: APIInputBase) -> Observable<Any> {
         let user = input.user
         let password = input.password
         let urlRequest = preprocess(input)
@@ -88,49 +100,61 @@ open class APIBase {
                     UIApplication.shared.isNetworkActivityIndicatorVisible = false
                 }
             })
-            .map { (dataResponse) -> JSONDictionary in
+            .map { (dataResponse) -> Any in
                 return try self.process(dataResponse)
             }
-            .catchError { [unowned self] error -> Observable<JSONDictionary> in
+            .catchError { [unowned self] error -> Observable<Any> in
                 return try self.handleRequestError(error, input: input)
             }
-            .do(onNext: { (json) in
-                if input.useCache {
-                    DispatchQueue.global().async {
-                        try? CacheManager.sharedInstance.write(urlString: input.urlEncodingString, data: json)
-                    }
-                }
-            })
+//            .do(onNext: { (json) in
+//                if input.useCache {
+//                    DispatchQueue.global().async {
+//                        try? CacheManager.sharedInstance.write(urlString: input.urlEncodingString, data: json)
+//                    }
+//                }
+//            })
         
-        let cacheRequest = Observable.just(input)
-            .filter { $0.useCache }
-            .subscribeOn(ConcurrentDispatchQueueScheduler(queue: DispatchQueue.global()))
-            .map {
-                try CacheManager.sharedInstance.read(urlString: $0.urlEncodingString)
-            }
-            .catchError({ (error) -> Observable<JSONDictionary> in
-                print(error)
-                return Observable.empty()
-            })
+        return urlRequest
         
-        return input.useCache
-            ? Observable.concat(cacheRequest, urlRequest).distinctUntilChanged (==)
-            : urlRequest
+//        let cacheRequest = Observable.just(input)
+//            .filter { $0.useCache }
+//            .subscribeOn(ConcurrentDispatchQueueScheduler(queue: DispatchQueue.global()))
+//            .map {
+//                try CacheManager.sharedInstance.read(urlString: $0.urlEncodingString)
+//            }
+//            .catchError({ (error) -> Observable<Any> in
+//                print(error)
+//                return Observable.empty()
+//            })
+//
+//        if input.useCache {
+//            return Observable.concat(cacheRequest, urlRequest).distinctUntilChanged({ (lhs, rhs) -> Bool in
+//                if let lhsDict = lhs as? JSONDictionary, let rhsDict = rhs as? JSONDictionary {
+//                    return lhsDict == rhsDict
+//                } else if let lhsArray = lhs as? [JSONDictionary], let rhsArray = rhs as? [JSONDictionary] {
+//                    return lhsArray == rhsArray
+//                } else {
+//                    return false
+//                }
+//            })
+//        } else {
+//            return urlRequest
+//        }
     }
     
     open func preprocess(_ input: APIInputBase) -> Observable<APIInputBase> {
         return Observable.just(input)
     }
     
-    open func process(_ response: (HTTPURLResponse, Data)) throws -> JSONDictionary {
+    open func process(_ response: (HTTPURLResponse, Data)) throws -> Any {
         let (response, data) = response
-        let json: JSONDictionary? = (try? JSONSerialization.jsonObject(with: data, options: [])) as? JSONDictionary
+        let json: Any? = (try? JSONSerialization.jsonObject(with: data, options: []))
         let error: Error
         let statusCode = response.statusCode
         switch statusCode {
         case 200..<300:
             print("👍 [\(statusCode)] " + (response.url?.absoluteString ?? ""))
-            return json ?? JSONDictionary()
+            return json ?? ""
         default:
             error = handleResponseError(response: response, data: data, json: json)
             print("❌ [\(statusCode)] " + (response.url?.absoluteString ?? ""))
@@ -143,11 +167,11 @@ open class APIBase {
         throw error
     }
     
-    open func handleRequestError(_ error: Error, input: APIInputBase) throws -> Observable<JSONDictionary> {
+    open func handleRequestError(_ error: Error, input: APIInputBase) throws -> Observable<Any> {
         throw error
     }
     
-    open func handleResponseError(response: HTTPURLResponse, data: Data, json: JSONDictionary?) -> Error {
+    open func handleResponseError(response: HTTPURLResponse, data: Data, json: Any?) -> Error {
         return APIUnknownError(statusCode: response.statusCode)
     }
 
