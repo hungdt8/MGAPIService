@@ -106,40 +106,42 @@ open class APIBase {
             .catchError { [unowned self] error -> Observable<Any> in
                 return try self.handleRequestError(error, input: input)
             }
-//            .do(onNext: { (json) in
-//                if input.useCache {
-//                    DispatchQueue.global().async {
-//                        try? CacheManager.sharedInstance.write(urlString: input.urlEncodingString, data: json)
-//                    }
-//                }
-//            })
+            .do(onNext: { (json) in
+                if input.useCache {
+                    DispatchQueue.global().async {
+                        try? CacheManager.sharedInstance.write(urlString: input.urlEncodingString, data: json)
+                    }
+                }
+            })
         
         return urlRequest
         
-//        let cacheRequest = Observable.just(input)
-//            .filter { $0.useCache }
-//            .subscribeOn(ConcurrentDispatchQueueScheduler(queue: DispatchQueue.global()))
-//            .map {
-//                try CacheManager.sharedInstance.read(urlString: $0.urlEncodingString)
-//            }
-//            .catchError({ (error) -> Observable<Any> in
-//                print(error)
-//                return Observable.empty()
-//            })
-//
-//        if input.useCache {
-//            return Observable.concat(cacheRequest, urlRequest).distinctUntilChanged({ (lhs, rhs) -> Bool in
-//                if let lhsDict = lhs as? JSONDictionary, let rhsDict = rhs as? JSONDictionary {
-//                    return lhsDict == rhsDict
-//                } else if let lhsArray = lhs as? [JSONDictionary], let rhsArray = rhs as? [JSONDictionary] {
-//                    return lhsArray == rhsArray
-//                } else {
-//                    return false
-//                }
-//            })
-//        } else {
-//            return urlRequest
-//        }
+        let cacheRequest = Observable.just(input)
+            .filter { $0.useCache }
+            .subscribeOn(ConcurrentDispatchQueueScheduler(queue: DispatchQueue.global()))
+            .map {
+                try CacheManager.sharedInstance.read(urlString: $0.urlEncodingString)
+            }
+            .catchError({ (error) -> Observable<Any> in
+                print(error)
+                return Observable.empty()
+            })
+
+        if input.useCache {
+            return Observable.concat(cacheRequest, urlRequest).distinctUntilChanged({ (lhs, rhs) -> Bool in
+                if let lhsDict = lhs as? JSONDictionary, let rhsDict = rhs as? JSONDictionary {
+                    return lhsDict == rhsDict
+                } else if let lhsArray = lhs as? [JSONDictionary], let rhsArray = rhs as? [JSONDictionary] {
+                    return lhsArray.elementsEqual(rhsArray, by: { (left, right) -> Bool in
+                        return left == right
+                    })
+                } else {
+                    return false
+                }
+            })
+        } else {
+            return urlRequest
+        }
     }
     
     open func preprocess(_ input: APIInputBase) -> Observable<APIInputBase> {
